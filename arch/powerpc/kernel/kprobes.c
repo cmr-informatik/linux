@@ -19,6 +19,7 @@
 #include <linux/extable.h>
 #include <linux/kdebug.h>
 #include <linux/slab.h>
+#include <linux/bug.h>
 #include <asm/code-patching.h>
 #include <asm/cacheflush.h>
 #include <asm/sstep.h>
@@ -105,7 +106,7 @@ kprobe_opcode_t *kprobe_lookup_name(const char *name, unsigned int offset)
 
 int arch_prepare_kprobe(struct kprobe *p)
 {
-	int ret = 0;
+	int ret = 0, rc;
 	struct kprobe *prev;
 	struct ppc_inst insn = ppc_inst_read((struct ppc_inst *)p->addr);
 	struct ppc_inst prefix = ppc_inst_read((struct ppc_inst *)(p->addr - 1));
@@ -138,7 +139,10 @@ int arch_prepare_kprobe(struct kprobe *p)
 	}
 
 	if (!ret) {
-		patch_instruction((struct ppc_inst *)p->ainsn.insn, insn);
+		rc = patch_instruction((struct ppc_inst *)p->ainsn.insn, insn);
+		if (WARN_ON(rc))
+			pr_err("Failed to patch at 0x%pK: %d\n",
+					(void *)p->ainsn.insn, rc);
 		p->opcode = ppc_inst_val(insn);
 	}
 
@@ -149,13 +153,23 @@ NOKPROBE_SYMBOL(arch_prepare_kprobe);
 
 void arch_arm_kprobe(struct kprobe *p)
 {
-	patch_instruction((struct ppc_inst *)p->addr, ppc_inst(BREAKPOINT_INSTRUCTION));
+	int rc = patch_instruction((struct ppc_inst *)p->addr,
+					ppc_inst(BREAKPOINT_INSTRUCTION));
+
+	if (WARN_ON(rc))
+		pr_err("Failed to patch trap at 0x%pK: %d\n",
+				(void *)p->addr, rc);
 }
 NOKPROBE_SYMBOL(arch_arm_kprobe);
 
 void arch_disarm_kprobe(struct kprobe *p)
 {
-	patch_instruction((struct ppc_inst *)p->addr, ppc_inst(p->opcode));
+	int rc = patch_instruction((struct ppc_inst *)p->addr,
+					ppc_inst(p->opcode));
+
+	if (WARN_ON(rc))
+		pr_err("Failed to remove trap at 0x%pK: %d\n",
+				(void *)p->addr, rc);
 }
 NOKPROBE_SYMBOL(arch_disarm_kprobe);
 

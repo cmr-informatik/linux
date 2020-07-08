@@ -141,59 +141,83 @@ void arch_remove_optimized_kprobe(struct optimized_kprobe *op)
 	}
 }
 
+#define PATCH_INSN_OR_GOTO(addr, instr, label)				     \
+do {									     \
+	int rc = patch_instruction((struct ppc_inst *)(addr), instr);	     \
+	if (rc) {							     \
+		pr_err("%s:%d Error patching instruction at 0x%pK (%pS): %d\n", \
+				__func__, __LINE__,			     \
+				(void *)(addr), (void *)(addr), rc);	     \
+		goto label;						     \
+	}								     \
+} while (0)
+
+/* XXX '#if 0' - YIKES. Apparently this function is unused now so remove it? */
+#if 0
 /*
  * emulate_step() requires insn to be emulated as
  * second parameter. Load register 'r4' with the
  * instruction.
  */
-void patch_imm32_load_insns(unsigned int val, kprobe_opcode_t *addr)
+static int patch_imm32_load_insns(unsigned int val, kprobe_opcode_t *addr)
 {
 	/* addis r4,0,(insn)@h */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ADDIS | ___PPC_RT(4) |
-				   ((val >> 16) & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ADDIS | ___PPC_RT(4) |
+			  ((val >> 16) & 0xffff)),
+			  patch_err);
 	addr++;
 
 	/* ori r4,r4,(insn)@l */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ORI | ___PPC_RA(4) |
-				   ___PPC_RS(4) | (val & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ORI | ___PPC_RA(4) |
+			  ___PPC_RS(4) | (val & 0xffff)),
+			  patch_err);
+
+	return 0;
+
+patch_err:
+	return -EFAULT;
 }
+#endif
 
 /*
  * Generate instructions to load provided immediate 64-bit value
  * to register 'reg' and patch these instructions at 'addr'.
  */
-void patch_imm64_load_insns(unsigned long val, int reg, kprobe_opcode_t *addr)
+static int patch_imm64_load_insns(unsigned long val, int reg, kprobe_opcode_t *addr)
 {
 	/* lis reg,(op)@highest */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ADDIS | ___PPC_RT(reg) |
-				   ((val >> 48) & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ADDIS | ___PPC_RT(reg) |
+			  ((val >> 48) & 0xffff)),
+			  patch_err);
 	addr++;
 
 	/* ori reg,reg,(op)@higher */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ORI | ___PPC_RA(reg) |
-				   ___PPC_RS(reg) | ((val >> 32) & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ORI | ___PPC_RA(reg) |
+			  ___PPC_RS(reg) | ((val >> 32) & 0xffff)),
+			  patch_err);
 	addr++;
 
 	/* rldicr reg,reg,32,31 */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_RLDICR | ___PPC_RA(reg) |
-				   ___PPC_RS(reg) | __PPC_SH64(32) | __PPC_ME64(31)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_RLDICR | ___PPC_RA(reg) |
+			  ___PPC_RS(reg) | __PPC_SH64(32) | __PPC_ME64(31)),
+			  patch_err);
 	addr++;
 
 	/* oris reg,reg,(op)@h */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ORIS | ___PPC_RA(reg) |
-				   ___PPC_RS(reg) | ((val >> 16) & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ORIS | ___PPC_RA(reg) |
+			  ___PPC_RS(reg) | ((val >> 16) & 0xffff)),
+			  patch_err);
 	addr++;
 
 	/* ori reg,reg,(op)@l */
-	patch_instruction((struct ppc_inst *)addr,
-			  ppc_inst(PPC_INST_ORI | ___PPC_RA(reg) |
-				   ___PPC_RS(reg) | (val & 0xffff)));
+	PATCH_INSN_OR_GOTO(addr, ppc_inst(PPC_INST_ORI | ___PPC_RA(reg) |
+			  ___PPC_RS(reg) | (val & 0xffff)),
+			  patch_err);
+
+	return 0;
+
+patch_err:
+	return -EFAULT;
 }
 
 int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
@@ -225,31 +249,34 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	 * be within 32MB on either side of the current instruction.
 	 */
 	b_offset = (unsigned long)buff - (unsigned long)p->addr;
-	if (!is_offset_in_branch_range(b_offset))
+	if (!is_offset_in_branch_range(b_offset)) {
+		rc = -ERANGE;
 		goto error;
+	}
 
 	/* Check if the return address is also within 32MB range */
 	b_offset = (unsigned long)(buff + TMPL_RET_IDX) -
 			(unsigned long)nip;
-	if (!is_offset_in_branch_range(b_offset))
+	if (!is_offset_in_branch_range(b_offset)) {
+		rc = -ERANGE;
 		goto error;
+	}
 
 	/* Setup template */
 	/* We can optimize this via patch_instruction_window later */
 	size = (TMPL_END_IDX * sizeof(kprobe_opcode_t)) / sizeof(int);
 	pr_devel("Copying template to %p, size %lu\n", buff, size);
-	for (i = 0; i < size; i++) {
-		rc = patch_instruction((struct ppc_inst *)(buff + i),
-				       ppc_inst(*(optprobe_template_entry + i)));
-		if (rc < 0)
-			goto error;
-	}
+	for (i = 0; i < size; i++)
+		PATCH_INSN_OR_GOTO((struct ppc_inst *)(buff + i),
+					ppc_inst(*(optprobe_template_entry + i)),
+					patch_err);
 
 	/*
 	 * Fixup the template with instructions to:
 	 * 1. load the address of the actual probepoint
 	 */
-	patch_imm64_load_insns((unsigned long)op, 3, buff + TMPL_OP_IDX);
+	if (patch_imm64_load_insns((unsigned long)op, 3, buff + TMPL_OP_IDX))
+		goto patch_err;
 
 	/*
 	 * 2. branch to optimized_callback() and emulate_step()
@@ -258,6 +285,7 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 	emulate_step_addr = (kprobe_opcode_t *)ppc_kallsyms_lookup_name("emulate_step");
 	if (!op_callback_addr || !emulate_step_addr) {
 		WARN(1, "Unable to lookup optimized_callback()/emulate_step()\n");
+		rc = -ERANGE;
 		goto error;
 	}
 
@@ -271,24 +299,31 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 			    (unsigned long)emulate_step_addr,
 			    BRANCH_SET_LINK);
 
-	if (rc)
+	if (rc) {
+		rc = -ERANGE;
 		goto error;
+	}
 
-	patch_instruction((struct ppc_inst *)(buff + TMPL_CALL_HDLR_IDX),
-			  branch_op_callback);
-	patch_instruction((struct ppc_inst *)(buff + TMPL_EMULATE_IDX),
-			  branch_emulate_step);
+	PATCH_INSN_OR_GOTO((struct ppc_inst *)(buff + TMPL_CALL_HDLR_IDX),
+				branch_op_callback, patch_err);
+
+	PATCH_INSN_OR_GOTO((struct ppc_inst *)(buff + TMPL_EMULATE_IDX),
+				branch_emulate_step, patch_err);
 
 	/*
 	 * 3. load instruction to be emulated into relevant register, and
 	 */
 	temp = ppc_inst_read((struct ppc_inst *)p->ainsn.insn);
-	patch_imm64_load_insns(ppc_inst_as_u64(temp), 4, buff + TMPL_INSN_IDX);
+	if (patch_imm64_load_insns(ppc_inst_as_u64(temp), 4, buff + TMPL_INSN_IDX))
+		goto patch_err;
 
 	/*
 	 * 4. branch back from trampoline
 	 */
-	patch_branch((struct ppc_inst *)(buff + TMPL_RET_IDX), (unsigned long)nip, 0);
+	create_branch(&temp, (struct ppc_inst *)(buff + TMPL_RET_IDX),
+			(unsigned long)nip, 0);
+	PATCH_INSN_OR_GOTO((struct ppc_inst *)(buff + TMPL_RET_IDX), temp,
+				patch_err);
 
 	flush_icache_range((unsigned long)buff,
 			   (unsigned long)(&buff[TMPL_END_IDX]));
@@ -297,9 +332,11 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op, struct kprobe *p)
 
 	return 0;
 
+patch_err:
+	rc = -EFAULT;
 error:
 	free_ppc_optinsn_slot(buff, 0);
-	return -ERANGE;
+	return rc;
 
 }
 
@@ -323,6 +360,7 @@ void arch_optimize_kprobes(struct list_head *oplist)
 	struct ppc_inst instr;
 	struct optimized_kprobe *op;
 	struct optimized_kprobe *tmp;
+	int rc;
 
 	list_for_each_entry_safe(op, tmp, oplist, list) {
 		/*
@@ -334,7 +372,11 @@ void arch_optimize_kprobes(struct list_head *oplist)
 		create_branch(&instr,
 			      (struct ppc_inst *)op->kp.addr,
 			      (unsigned long)op->optinsn.insn, 0);
-		patch_instruction((struct ppc_inst *)op->kp.addr, instr);
+		rc = patch_instruction((struct ppc_inst *)op->kp.addr, instr);
+		if (rc)
+			pr_err("%s:%d: Error patching instruction at 0x%pK: %d\n",
+					__func__, __LINE__,
+					(void *)(op->kp.addr), rc);
 		list_del_init(&op->list);
 	}
 }
