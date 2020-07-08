@@ -32,6 +32,17 @@
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 
+#define PATCH_INSN_OR_GOTO(addr, instr, label)				     \
+do {									     \
+	int rc = patch_instruction((struct ppc_inst *)(addr), instr);	     \
+	if (rc) {							     \
+		pr_err("%s:%d Error patching instruction at 0x%pK (%pS): %d\n", \
+				__func__, __LINE__,			     \
+				(void *)(addr), (void *)(addr), rc);	     \
+		goto label;						     \
+	}								     \
+} while (0)
+
 /*
  * We generally only have a single long_branch tramp and at most 2 or 3 plt
  * tramps generated. But, we don't use the plt tramps currently. We also allot
@@ -79,10 +90,12 @@ ftrace_modify_code(unsigned long ip, struct ppc_inst old, struct ppc_inst new)
 	}
 
 	/* replace the text with the new text */
-	if (patch_instruction((struct ppc_inst *)ip, new))
-		return -EPERM;
+	PATCH_INSN_OR_GOTO(ip, new, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 /*
@@ -208,12 +221,12 @@ __ftrace_make_nop(struct module *mod,
 	}
 #endif /* CONFIG_MPROFILE_KERNEL */
 
-	if (patch_instruction((struct ppc_inst *)ip, pop)) {
-		pr_err("Patching NOP failed.\n");
-		return -EPERM;
-	}
+	PATCH_INSN_OR_GOTO(ip, pop, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 #else /* !PPC64 */
@@ -279,11 +292,12 @@ __ftrace_make_nop(struct module *mod,
 	}
 
 	op = ppc_inst(PPC_INST_NOP);
-
-	if (patch_instruction((struct ppc_inst *)ip, op))
-		return -EPERM;
+	PATCH_INSN_OR_GOTO(ip, op, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 #endif /* PPC64 */
 #endif /* CONFIG_MODULES */
@@ -380,10 +394,7 @@ static int setup_mcount_compiler_tramp(unsigned long tramp)
 		return -1;
 	}
 
-	if (patch_branch((struct ppc_inst *)tramp, ptr, 0)) {
-		pr_debug("REL24 out of range!\n");
-		return -1;
-	}
+	PATCH_INSN_OR_GOTO(tramp, instr, patch_err);
 
 	if (add_ftrace_tramp(tramp)) {
 		pr_debug("No tramp locations left\n");
@@ -391,6 +402,9 @@ static int setup_mcount_compiler_tramp(unsigned long tramp)
 	}
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 static int __ftrace_make_nop_kernel(struct dyn_ftrace *rec, unsigned long addr)
@@ -424,12 +438,12 @@ static int __ftrace_make_nop_kernel(struct dyn_ftrace *rec, unsigned long addr)
 		}
 	}
 
-	if (patch_instruction((struct ppc_inst *)ip, ppc_inst(PPC_INST_NOP))) {
-		pr_err("Patching NOP failed.\n");
-		return -EPERM;
-	}
+	PATCH_INSN_OR_GOTO(ip, ppc_inst(PPC_INST_NOP), patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 int ftrace_make_nop(struct module *mod,
@@ -575,19 +589,18 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 		return -EINVAL;
 	}
 
-	if (patch_branch(ip, tramp, BRANCH_SET_LINK)) {
-		pr_err("REL24 out of range!\n");
-		return -EINVAL;
-	}
+	PATCH_INSN_OR_GOTO(ip, instr, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 #else  /* !CONFIG_PPC64: */
 static int
 __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 {
-	int err;
 	struct ppc_inst op;
 	unsigned long ip = rec->ip;
 
@@ -608,19 +621,20 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	}
 
 	/* create the branch to the trampoline */
-	err = create_branch(&op, (struct ppc_inst *)ip,
-			    rec->arch.mod->arch.tramp, BRANCH_SET_LINK);
-	if (err) {
+	if (create_branch(&op, (struct ppc_inst *)ip,
+			    rec->arch.mod->arch.tramp, BRANCH_SET_LINK)) {
 		pr_err("REL24 out of range!\n");
 		return -EINVAL;
 	}
 
 	pr_devel("write to %lx\n", rec->ip);
 
-	if (patch_instruction((struct ppc_inst *)ip, op))
-		return -EPERM;
+	PATCH_INSN_OR_GOTO(ip, op, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 #endif /* CONFIG_PPC64 */
 #endif /* CONFIG_MODULES */
@@ -664,12 +678,17 @@ static int __ftrace_make_call_kernel(struct dyn_ftrace *rec, unsigned long addr)
 		return -EINVAL;
 	}
 
-	if (patch_branch(ip, tramp, BRANCH_SET_LINK)) {
-		pr_err("Error patching branch to ftrace tramp!\n");
+	if (create_branch(&op, ip, tramp, BRANCH_SET_LINK)) {
+		pr_err("Branch out of range\n");
 		return -EINVAL;
 	}
 
+	PATCH_INSN_OR_GOTO(ip, op, patch_err);
+
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 
 int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
@@ -762,10 +781,11 @@ __ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
 	/* The new target may be within range */
 	if (test_24bit_addr(ip, addr)) {
 		/* within range */
-		if (patch_branch((struct ppc_inst *)ip, addr, BRANCH_SET_LINK)) {
+		if (create_branch(&op, (struct ppc_inst *)ip, addr, BRANCH_SET_LINK)) {
 			pr_err("REL24 out of range!\n");
 			return -EINVAL;
 		}
+		PATCH_INSN_OR_GOTO(ip, op, patch_err);
 
 		return 0;
 	}
@@ -795,12 +815,12 @@ __ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
 		return -EINVAL;
 	}
 
-	if (patch_branch((struct ppc_inst *)ip, tramp, BRANCH_SET_LINK)) {
-		pr_err("REL24 out of range!\n");
-		return -EINVAL;
-	}
+	PATCH_INSN_OR_GOTO(ip, op, patch_err);
 
 	return 0;
+
+patch_err:
+	return -EPERM;
 }
 #endif
 
