@@ -21,22 +21,38 @@ extern int handle_rt_signal32(struct ksignal *ksig, sigset_t *oldset,
 
 extern unsigned long copy_fpr_to_user(void __user *to,
 				      struct task_struct *task);
+extern unsigned long unsafe_copy_fpr_to_user(void __user *to,
+					struct task_struct *task);
 extern unsigned long copy_ckfpr_to_user(void __user *to,
+					       struct task_struct *task);
+extern unsigned long unsafe_copy_ckfpr_to_user(void __user *to,
 					       struct task_struct *task);
 extern unsigned long copy_fpr_from_user(struct task_struct *task,
 					void __user *from);
+extern unsigned long unsafe_copy_fpr_from_user(struct task_struct *task,
+					void __user *from);
 extern unsigned long copy_ckfpr_from_user(struct task_struct *task,
+						 void __user *from);
+extern unsigned long unsafe_copy_ckfpr_from_user(struct task_struct *task,
 						 void __user *from);
 extern unsigned long get_tm_stackpointer(struct task_struct *tsk);
 
 #ifdef CONFIG_VSX
 extern unsigned long copy_vsx_to_user(void __user *to,
 				      struct task_struct *task);
+extern unsigned long unsafe_copy_vsx_to_user(void __user *to,
+					struct task_struct *task);
 extern unsigned long copy_ckvsx_to_user(void __user *to,
+					       struct task_struct *task);
+extern unsigned long unsafe_copy_ckvsx_to_user(void __user *to,
 					       struct task_struct *task);
 extern unsigned long copy_vsx_from_user(struct task_struct *task,
 					void __user *from);
+extern unsigned long unsafe_copy_vsx_from_user(struct task_struct *task,
+					void __user *from);
 extern unsigned long copy_ckvsx_from_user(struct task_struct *task,
+						 void __user *from);
+extern unsigned long unsafe_copy_ckvsx_from_user(struct task_struct *task,
 						 void __user *from);
 #endif
 

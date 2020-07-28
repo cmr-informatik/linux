@@ -26,8 +26,7 @@
 #include "signal.h"
 
 #ifdef CONFIG_VSX
-unsigned long copy_fpr_to_user(void __user *to,
-			       struct task_struct *task)
+unsigned long unsafe_copy_fpr_to_user(void __user *to, struct task_struct *task)
 {
 	u64 buf[ELF_NFPREG];
 	int i;
@@ -36,26 +35,58 @@ unsigned long copy_fpr_to_user(void __user *to,
 	for (i = 0; i < (ELF_NFPREG - 1) ; i++)
 		buf[i] = task->thread.TS_FPR(i);
 	buf[i] = task->thread.fp_state.fpscr;
-	return __copy_to_user(to, buf, ELF_NFPREG * sizeof(double));
+	unsafe_copy_to_user(to, buf, ELF_NFPREG * sizeof(double), Efault);
+
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
-unsigned long copy_fpr_from_user(struct task_struct *task,
-				 void __user *from)
+unsigned long copy_fpr_to_user(void __user *to,
+			       struct task_struct *task)
+{
+	int err;
+
+	if (!user_write_access_begin(to, ELF_NFPREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_fpr_to_user(to, task);
+	user_write_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_fpr_from_user(struct task_struct *task,
+					void __user *from)
 {
 	u64 buf[ELF_NFPREG];
 	int i;
 
-	if (__copy_from_user(buf, from, ELF_NFPREG * sizeof(double)))
-		return 1;
+	unsafe_copy_from_user(buf, from, ELF_NFPREG * sizeof(double),
+			Efault);
+
 	for (i = 0; i < (ELF_NFPREG - 1) ; i++)
 		task->thread.TS_FPR(i) = buf[i];
 	task->thread.fp_state.fpscr = buf[i];
 
 	return 0;
+Efault:
+	return -EFAULT;
 }
 
-unsigned long copy_vsx_to_user(void __user *to,
-			       struct task_struct *task)
+unsigned long copy_fpr_from_user(struct task_struct *task,
+				 void __user *from)
+{
+	int err;
+
+	if (!user_read_access_begin(from, ELF_NFPREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_fpr_from_user(task, from);
+	user_read_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_vsx_to_user(void __user *to, struct task_struct *task)
 {
 	u64 buf[ELF_NVSRHALFREG];
 	int i;
@@ -63,25 +94,58 @@ unsigned long copy_vsx_to_user(void __user *to,
 	/* save FPR copy to local buffer then write to the thread_struct */
 	for (i = 0; i < ELF_NVSRHALFREG; i++)
 		buf[i] = task->thread.fp_state.fpr[i][TS_VSRLOWOFFSET];
-	return __copy_to_user(to, buf, ELF_NVSRHALFREG * sizeof(double));
+	unsafe_copy_to_user(to, buf, ELF_NVSRHALFREG * sizeof(double), Efault);
+
+	return 0;
+Efault:
+	return -EFAULT;
+}
+
+unsigned long copy_vsx_to_user(void __user *to,
+			       struct task_struct *task)
+{
+	int err;
+
+	if (!user_write_access_begin(to, ELF_NVSRHALFREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_vsx_to_user(to, task);
+	user_write_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_vsx_from_user(struct task_struct *task,
+					void __user *from)
+{
+	u64 buf[ELF_NVSRHALFREG];
+	int i;
+
+	unsafe_copy_from_user(buf, from, ELF_NVSRHALFREG * sizeof(double),
+			Efault);
+	for (i = 0; i < ELF_NVSRHALFREG ; i++)
+		task->thread.fp_state.fpr[i][TS_VSRLOWOFFSET] = buf[i];
+
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
 unsigned long copy_vsx_from_user(struct task_struct *task,
 				 void __user *from)
 {
-	u64 buf[ELF_NVSRHALFREG];
-	int i;
+	int err;
 
-	if (__copy_from_user(buf, from, ELF_NVSRHALFREG * sizeof(double)))
-		return 1;
-	for (i = 0; i < ELF_NVSRHALFREG ; i++)
-		task->thread.fp_state.fpr[i][TS_VSRLOWOFFSET] = buf[i];
-	return 0;
+	if (!user_read_access_begin(from, ELF_NVSRHALFREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_vsx_from_user(task, from);
+	user_read_access_end();
+
+	return err;
 }
 
 #ifdef CONFIG_PPC_TRANSACTIONAL_MEM
-unsigned long copy_ckfpr_to_user(void __user *to,
-				  struct task_struct *task)
+unsigned long unsafe_copy_ckfpr_to_user(void __user *to,
+					struct task_struct *task)
 {
 	u64 buf[ELF_NFPREG];
 	int i;
@@ -90,26 +154,57 @@ unsigned long copy_ckfpr_to_user(void __user *to,
 	for (i = 0; i < (ELF_NFPREG - 1) ; i++)
 		buf[i] = task->thread.TS_CKFPR(i);
 	buf[i] = task->thread.ckfp_state.fpscr;
-	return __copy_to_user(to, buf, ELF_NFPREG * sizeof(double));
+	unsafe_copy_to_user(to, buf, ELF_NFPREG * sizeof(double), Efault);
+
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
-unsigned long copy_ckfpr_from_user(struct task_struct *task,
+unsigned long copy_ckfpr_to_user(void __user *to,
+				  struct task_struct *task)
+{
+	int err;
+
+	if (!user_write_access_begin(to, ELF_NFPREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_ckfpr_to_user(to, task);
+	user_write_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_ckfpr_from_user(struct task_struct *task,
 					  void __user *from)
 {
 	u64 buf[ELF_NFPREG];
 	int i;
 
-	if (__copy_from_user(buf, from, ELF_NFPREG * sizeof(double)))
-		return 1;
+	unsafe_copy_from_user(buf, from, ELF_NFPREG * sizeof(double), Efault);
 	for (i = 0; i < (ELF_NFPREG - 1) ; i++)
 		task->thread.TS_CKFPR(i) = buf[i];
 	task->thread.ckfp_state.fpscr = buf[i];
 
 	return 0;
+Efault:
+	return -EFAULT;
 }
 
-unsigned long copy_ckvsx_to_user(void __user *to,
-				  struct task_struct *task)
+unsigned long copy_ckfpr_from_user(struct task_struct *task,
+					  void __user *from)
+{
+	int err;
+
+	if (!user_read_access_begin(from, ELF_NFPREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_ckfpr_from_user(task, from);
+	user_read_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_ckvsx_to_user(void __user *to,
+					struct task_struct *task)
 {
 	u64 buf[ELF_NVSRHALFREG];
 	int i;
@@ -117,28 +212,82 @@ unsigned long copy_ckvsx_to_user(void __user *to,
 	/* save FPR copy to local buffer then write to the thread_struct */
 	for (i = 0; i < ELF_NVSRHALFREG; i++)
 		buf[i] = task->thread.ckfp_state.fpr[i][TS_VSRLOWOFFSET];
-	return __copy_to_user(to, buf, ELF_NVSRHALFREG * sizeof(double));
+	unsafe_copy_to_user(to, buf, ELF_NVSRHALFREG * sizeof(double), Efault);
+
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
-unsigned long copy_ckvsx_from_user(struct task_struct *task,
+unsigned long copy_ckvsx_to_user(void __user *to,
+				  struct task_struct *task)
+{
+	int err;
+
+	if (!user_write_access_begin(to, ELF_NVSRHALFREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_ckvsx_to_user(to, task);
+	user_write_access_end();
+
+	return err;
+}
+
+unsigned long unsafe_copy_ckvsx_from_user(struct task_struct *task,
 					  void __user *from)
 {
 	u64 buf[ELF_NVSRHALFREG];
 	int i;
 
-	if (__copy_from_user(buf, from, ELF_NVSRHALFREG * sizeof(double)))
-		return 1;
+	unsafe_copy_from_user(buf, from, ELF_NVSRHALFREG * sizeof(double),
+			Efault);
 	for (i = 0; i < ELF_NVSRHALFREG ; i++)
 		task->thread.ckfp_state.fpr[i][TS_VSRLOWOFFSET] = buf[i];
+
 	return 0;
+Efault:
+	return -EFAULT;
+}
+
+unsigned long copy_ckvsx_from_user(struct task_struct *task,
+					  void __user *from)
+{
+	int err;
+
+	if (!user_read_access_begin(from, ELF_NVSRHALFREG * sizeof(double)))
+		return -EFAULT;
+	err = unsafe_copy_ckvsx_from_user(task, from);
+	user_read_access_end();
+
+	return err;
 }
 #endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
 #else
+inline unsigned long unsafe_copy_fpr_to_user(void __user *to,
+					struct task_struct *task)
+{
+	unsafe_copy_to_user(to, task->thread.fp_state.fpr,
+			ELF_NFPREG * sizeof(double), Efault);
+	return 0;
+Efault:
+	return -EFAULT;
+}
+
 inline unsigned long copy_fpr_to_user(void __user *to,
 				      struct task_struct *task)
 {
 	return __copy_to_user(to, task->thread.fp_state.fpr,
 			      ELF_NFPREG * sizeof(double));
+}
+
+
+inline unsigned long unsafe_copy_fpr_from_user(struct task_struct *task,
+					void __user *from)
+{
+	unsafe_copy_fpr_from_user(task->thread.fp_state.fpr, from,
+				ELF_NFPREG * sizeof(double), Efault);
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
 inline unsigned long copy_fpr_from_user(struct task_struct *task,
@@ -149,11 +298,31 @@ inline unsigned long copy_fpr_from_user(struct task_struct *task,
 }
 
 #ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+inline unsigned long unsafe_copy_ckfpr_to_user(void __user *to,
+					struct task_struct *task)
+{
+	unsafe_copy_to_user(to, task->thread.ckfp_state.fpr,
+			ELF_NFPREG * sizeof(double), Efault);
+	return 0;
+Efault:
+	return -EFAULT;
+}
+
 inline unsigned long copy_ckfpr_to_user(void __user *to,
 					 struct task_struct *task)
 {
 	return __copy_to_user(to, task->thread.ckfp_state.fpr,
 			      ELF_NFPREG * sizeof(double));
+}
+
+inline unsigned long unsafe_copy_ckfpr_from_user(struct task_struct *task,
+						 void __user *from)
+{
+	unsafe_copy_from_user(task->thread.ckfp_state.fpr, from,
+			ELF_NFPREG * sizeof(double), Efault);
+	return 0;
+Efault:
+	return -EFAULT;
 }
 
 inline unsigned long copy_ckfpr_from_user(struct task_struct *task,
