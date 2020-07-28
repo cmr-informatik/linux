@@ -182,8 +182,10 @@ EXPORT_SYMBOL(giveup_fpu);
 /*
  * Make sure the floating-point register state in the
  * the thread_struct is up to date for task tsk.
+ *
+ * Must run notrace since it is called between user_access_*_begin and *_end.
  */
-void flush_fp_to_thread(struct task_struct *tsk)
+void notrace flush_fp_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		/*
@@ -290,8 +292,10 @@ EXPORT_SYMBOL(enable_kernel_altivec);
 /*
  * Make sure the VMX/Altivec register state in the
  * the thread_struct is up to date for task tsk.
+ *
+ * Must run notrace since it is called between user_access_*_begin and *_end.
  */
-void flush_altivec_to_thread(struct task_struct *tsk)
+void notrace flush_altivec_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
@@ -358,7 +362,11 @@ void enable_kernel_vsx(void)
 }
 EXPORT_SYMBOL(enable_kernel_vsx);
 
-void flush_vsx_to_thread(struct task_struct *tsk)
+/*
+ * Must run notrace since it is called between user_access_*_begin
+ * and *_end.
+ */
+void notrace flush_vsx_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
