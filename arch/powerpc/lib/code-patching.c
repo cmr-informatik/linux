@@ -20,6 +20,7 @@
 #include <asm/setup.h>
 #include <asm/inst.h>
 #include <asm/mmu_context.h>
+#include <asm/debug.h>
 
 static int __patch_instruction(struct ppc_inst *exec_addr, struct ppc_inst instr,
 			       struct ppc_inst *patch_addr)
@@ -56,7 +57,6 @@ static inline void init_temp_mm(struct temp_mm *temp_mm, struct mm_struct *mm)
 {
 	temp_mm->temp = mm;
 	temp_mm->prev = NULL;
-	temp_mm->is_kernel_thread = false;
 	memset(&temp_mm->brk, 0, sizeof(temp_mm->brk));
 }
 
@@ -64,18 +64,8 @@ static inline void use_temporary_mm(struct temp_mm *temp_mm)
 {
 	lockdep_assert_irqs_disabled();
 
-	temp_mm->is_kernel_thread = current->mm == NULL;
-	if (temp_mm->is_kernel_thread)
-		temp_mm->prev = current->active_mm;
-	else
-		temp_mm->prev = current->mm;
-
-	/*
-	 * Hash requires a non-NULL current->mm to allocate a userspace address
-	 * when handling a page fault. Does not appear to hurt in Radix either.
-	 */
-	current->mm = temp_mm->temp;
-	switch_mm_irqs_off(NULL, temp_mm->temp, current);
+	temp_mm->prev = current->active_mm;
+	switch_mm_irqs_off(temp_mm->prev, temp_mm->temp, current);
 
 	if (ppc_breakpoint_available()) {
 		struct arch_hw_breakpoint null_brk = {0};
@@ -93,11 +83,7 @@ static inline void unuse_temporary_mm(struct temp_mm *temp_mm)
 {
 	lockdep_assert_irqs_disabled();
 
-	if (temp_mm->is_kernel_thread)
-		current->mm = NULL;
-	else
-		current->mm = temp_mm->prev;
-	switch_mm_irqs_off(NULL, temp_mm->prev, current);
+	switch_mm_irqs_off(temp_mm->temp, temp_mm->prev, current);
 
 	if (ppc_breakpoint_available()) {
 		int i = 0;
@@ -191,6 +177,25 @@ static int map_patch(const void *addr, struct patch_mapping *patch_mapping)
 
 	init_temp_mm(&patch_mapping->temp_mm, patching_mm);
 	use_temporary_mm(&patch_mapping->temp_mm);
+
+#ifdef CONFIG_PPC_BOOK3S_64
+	if (!radix_enabled()) {
+		int err = hash_page_mm(patching_mm, patching_addr,
+					pgprot_val(pgprot), 0, 0);
+		if (unlikely(err)) {
+			pr_warn("map patch: failed to hash page w/ err=%d\n",
+				err);
+			return err;
+		}
+
+		err = slb_allocate_user(patching_mm, patching_addr);
+		if (unlikely(err)) {
+			pr_warn("map patch: failed to allocate slb w/ err=%d\n",
+				err);
+			return err;
+		}
+	}
+#endif
 
 	return 0;
 }

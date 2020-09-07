@@ -262,5 +262,7 @@ static inline unsigned long get_user_vsid(mm_context_t *ctx,
 	return get_vsid(context, ea, ssize);
 }
 
+extern long slb_allocate_user(struct mm_struct *mm, unsigned long ea);
+
 #endif /* __ASSEMBLY__ */
 #endif /* _ASM_POWERPC_BOOK3S_64_MMU_H_ */

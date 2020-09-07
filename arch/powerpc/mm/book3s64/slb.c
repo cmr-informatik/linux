@@ -33,7 +33,7 @@ enum slb_index {
 	KSTACK_INDEX	= 1, /* Kernel stack map */
 };
 
-static long slb_allocate_user(struct mm_struct *mm, unsigned long ea);
+long slb_allocate_user(struct mm_struct *mm, unsigned long ea);
 
 #define slb_esid_mask(ssize)	\
 	(((ssize) == MMU_SEGSIZE_256M)? ESID_MASK: ESID_MASK_1T)
@@ -806,7 +806,7 @@ static long slb_allocate_kernel(unsigned long ea, unsigned long id)
 	return slb_insert_entry(ea, context, flags, ssize, true);
 }
 
-static long slb_allocate_user(struct mm_struct *mm, unsigned long ea)
+long slb_allocate_user(struct mm_struct *mm, unsigned long ea)
 {
 	unsigned long context;
 	unsigned long flags;
