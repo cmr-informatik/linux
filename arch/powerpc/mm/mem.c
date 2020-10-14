@@ -378,7 +378,7 @@ static inline bool flush_coherent_icache(unsigned long addr)
  * @start: the start address
  * @stop: the stop address (exclusive)
  */
-static void invalidate_icache_range(unsigned long start, unsigned long stop)
+static void notrace invalidate_icache_range(unsigned long start, unsigned long stop)
 {
 	unsigned long shift = l1_icache_shift();
 	unsigned long bytes = l1_icache_bytes();
@@ -402,7 +402,7 @@ static void invalidate_icache_range(unsigned long start, unsigned long stop)
  * @start: the start address
  * @stop: the stop address (exclusive)
  */
-void flush_icache_range(unsigned long start, unsigned long stop)
+void notrace flush_icache_range(unsigned long start, unsigned long stop)
 {
 	if (flush_coherent_icache(start))
 		return;

@@ -84,7 +84,7 @@ extern unsigned long _get_SP(void);
  */
 bool tm_suspend_disabled __ro_after_init = false;
 
-static void check_if_tm_restore_required(struct task_struct *tsk)
+static void notrace check_if_tm_restore_required(struct task_struct *tsk)
 {
 	/*
 	 * If we are saving the current thread's registers, and the
@@ -151,7 +151,7 @@ void notrace __msr_check_and_clear(unsigned long bits)
 EXPORT_SYMBOL(__msr_check_and_clear);
 
 #ifdef CONFIG_PPC_FPU
-static void __giveup_fpu(struct task_struct *tsk)
+static void notrace __giveup_fpu(struct task_struct *tsk)
 {
 	unsigned long msr;
 
@@ -163,7 +163,7 @@ static void __giveup_fpu(struct task_struct *tsk)
 	tsk->thread.regs->msr = msr;
 }
 
-void giveup_fpu(struct task_struct *tsk)
+void notrace giveup_fpu(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
 
@@ -177,7 +177,7 @@ EXPORT_SYMBOL(giveup_fpu);
  * Make sure the floating-point register state in the
  * the thread_struct is up to date for task tsk.
  */
-void flush_fp_to_thread(struct task_struct *tsk)
+void notrace flush_fp_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		/*
@@ -234,7 +234,7 @@ static inline void __giveup_fpu(struct task_struct *tsk) { }
 #endif /* CONFIG_PPC_FPU */
 
 #ifdef CONFIG_ALTIVEC
-static void __giveup_altivec(struct task_struct *tsk)
+static void notrace __giveup_altivec(struct task_struct *tsk)
 {
 	unsigned long msr;
 
@@ -246,7 +246,7 @@ static void __giveup_altivec(struct task_struct *tsk)
 	tsk->thread.regs->msr = msr;
 }
 
-void giveup_altivec(struct task_struct *tsk)
+void notrace giveup_altivec(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
 
@@ -285,7 +285,7 @@ EXPORT_SYMBOL(enable_kernel_altivec);
  * Make sure the VMX/Altivec register state in the
  * the thread_struct is up to date for task tsk.
  */
-void flush_altivec_to_thread(struct task_struct *tsk)
+void notrace flush_altivec_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
@@ -300,7 +300,7 @@ EXPORT_SYMBOL_GPL(flush_altivec_to_thread);
 #endif /* CONFIG_ALTIVEC */
 
 #ifdef CONFIG_VSX
-static void __giveup_vsx(struct task_struct *tsk)
+static void notrace __giveup_vsx(struct task_struct *tsk)
 {
 	unsigned long msr = tsk->thread.regs->msr;
 
@@ -317,7 +317,7 @@ static void __giveup_vsx(struct task_struct *tsk)
 		__giveup_altivec(tsk);
 }
 
-static void giveup_vsx(struct task_struct *tsk)
+static void notrace giveup_vsx(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
 
@@ -352,7 +352,7 @@ void enable_kernel_vsx(void)
 }
 EXPORT_SYMBOL(enable_kernel_vsx);
 
-void flush_vsx_to_thread(struct task_struct *tsk)
+void notrace flush_vsx_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
