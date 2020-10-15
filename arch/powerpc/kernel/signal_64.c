@@ -600,30 +600,33 @@ static long restore_tm_sigcontexts(struct task_struct *tsk,
 /*
  * Setup the trampoline code on the stack
  */
-static long setup_trampoline(unsigned int syscall, unsigned int __user *tramp)
+#define unsafe_setup_trampoline(syscall, tramp, e) \
+	unsafe_op_wrap(__unsafe_setup_trampoline(syscall, tramp), e)
+static long notrace __unsafe_setup_trampoline(unsigned int syscall,
+					unsigned int __user *tramp)
 {
 	int i;
-	long err = 0;
 
 	/* bctrl # call the handler */
-	err |= __put_user(PPC_INST_BCTRL, &tramp[0]);
+	unsafe_put_user(PPC_INST_BCTRL, &tramp[0], err);
 	/* addi r1, r1, __SIGNAL_FRAMESIZE  # Pop the dummy stackframe */
-	err |= __put_user(PPC_INST_ADDI | __PPC_RT(R1) | __PPC_RA(R1) |
-			  (__SIGNAL_FRAMESIZE & 0xffff), &tramp[1]);
+	unsafe_put_user(PPC_INST_ADDI | __PPC_RT(R1) | __PPC_RA(R1) |
+			  (__SIGNAL_FRAMESIZE & 0xffff), &tramp[1], err);
 	/* li r0, __NR_[rt_]sigreturn| */
-	err |= __put_user(PPC_INST_ADDI | (syscall & 0xffff), &tramp[2]);
+	unsafe_put_user(PPC_INST_ADDI | (syscall & 0xffff), &tramp[2], err);
 	/* sc */
-	err |= __put_user(PPC_INST_SC, &tramp[3]);
+	unsafe_put_user(PPC_INST_SC, &tramp[3], err);
 
 	/* Minimal traceback info */
 	for (i=TRAMP_TRACEBACK; i < TRAMP_SIZE ;i++)
-		err |= __put_user(0, &tramp[i]);
+		unsafe_put_user(0, &tramp[i], err);
 
-	if (!err)
-		flush_icache_range((unsigned long) &tramp[0],
-			   (unsigned long) &tramp[TRAMP_SIZE]);
+	flush_icache_range((unsigned long)&tramp[0],
+			   (unsigned long)&tramp[TRAMP_SIZE]);
 
-	return err;
+	return 0;
+err:
+	return 1;
 }
 
 /*
@@ -888,7 +891,10 @@ int handle_rt_signal64(struct ksignal *ksig, sigset_t *set,
 	if (vdso64_rt_sigtramp && tsk->mm->context.vdso_base) {
 		regs->nip = tsk->mm->context.vdso_base + vdso64_rt_sigtramp;
 	} else {
-		err |= setup_trampoline(__NR_rt_sigreturn, &frame->tramp[0]);
+		if (!user_write_access_begin(frame, sizeof(struct rt_sigframe)))
+			return -EFAULT;
+		err |= __unsafe_setup_trampoline(__NR_rt_sigreturn, &frame->tramp[0]);
+		user_write_access_end();
 		if (err)
 			goto badframe;
 		regs->nip = (unsigned long) &frame->tramp[0];
