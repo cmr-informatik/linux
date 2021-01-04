@@ -70,8 +70,9 @@ __ro_after_init DEFINE_STATIC_KEY_FALSE(stress_slb_key);
 
 static void assert_slb_presence(bool present, unsigned long ea)
 {
-#ifdef CONFIG_DEBUG_VM
+#if 1 
 	unsigned long tmp;
+	unsigned long old_ea = ea;
 
 	WARN_ON_ONCE(mfmsr() & MSR_EE);
 
@@ -84,6 +85,9 @@ static void assert_slb_presence(bool present, unsigned long ea)
 	 */
 	ea &= ~((1UL << SID_SHIFT) - 1);
 	asm volatile(__PPC_SLBFEE_DOT(%0, %1) : "=r"(tmp) : "r"(ea) : "cr0");
+
+	if (present == (tmp == 0))
+		pr_warn("cmr> assert_slb_presence: %lx", old_ea);
 
 	WARN_ON(present == (tmp == 0));
 #endif

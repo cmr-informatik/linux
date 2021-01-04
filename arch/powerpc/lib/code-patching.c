@@ -46,6 +46,9 @@ int raw_patch_instruction(struct ppc_inst *addr, struct ppc_inst instr)
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
 
+static struct mm_struct *patching_mm __ro_after_init;
+static unsigned long patching_addr __ro_after_init;
+
 struct temp_mm {
 	struct mm_struct *temp;
 	struct mm_struct *prev;
@@ -60,12 +63,19 @@ static inline void init_temp_mm(struct temp_mm *temp_mm, struct mm_struct *mm)
 	memset(&temp_mm->brk, 0, sizeof(temp_mm->brk));
 }
 
+#define PATCHING_MM_ACTIVE_CPUS(f, x)					\
+	pr_warn("cmr> "f": "x" active_cpus %d\n",			\
+		atomic_read(&(patching_mm->context.active_cpus)));	\
+
 static inline void use_temporary_mm(struct temp_mm *temp_mm)
 {
 	lockdep_assert_irqs_disabled();
 
 	temp_mm->prev = current->active_mm;
+
+	PATCHING_MM_ACTIVE_CPUS("use_temporary_mm", "pre");
 	switch_mm_irqs_off(temp_mm->prev, temp_mm->temp, current);
+	PATCHING_MM_ACTIVE_CPUS("use_temporary_mm", "post");
 
 	if (ppc_breakpoint_available()) {
 		struct arch_hw_breakpoint null_brk = {0};
@@ -83,7 +93,9 @@ static inline void unuse_temporary_mm(struct temp_mm *temp_mm)
 {
 	lockdep_assert_irqs_disabled();
 
+	PATCHING_MM_ACTIVE_CPUS("unuse_temporary_mm", "pre");
 	switch_mm_irqs_off(temp_mm->temp, temp_mm->prev, current);
+	PATCHING_MM_ACTIVE_CPUS("unuse_temporary_mm", "post");
 
 	if (ppc_breakpoint_available()) {
 		int i = 0;
@@ -94,8 +106,10 @@ static inline void unuse_temporary_mm(struct temp_mm *temp_mm)
 	}
 }
 
-static struct mm_struct *patching_mm __ro_after_init;
-static unsigned long patching_addr __ro_after_init;
+void* read_patching_mm(void)
+{
+	return patching_mm;
+}
 
 void __init poking_init(void)
 {
@@ -181,7 +195,9 @@ static int map_patch(const void *addr, struct patch_mapping *patch_mapping)
 #ifdef CONFIG_PPC_BOOK3S_64
 	if (!radix_enabled()) {
 		int err = hash_page_mm(patching_mm, patching_addr,
-					pgprot_val(pgprot), 0, 0);
+				pgprot_val(pgprot), 0,
+				/* XXX do we actually want local here? */
+				HPTE_LOCAL_UPDATE);
 		if (unlikely(err)) {
 			pr_warn("map patch: failed to hash page w/ err=%d\n",
 				err);
@@ -194,6 +210,14 @@ static int map_patch(const void *addr, struct patch_mapping *patch_mapping)
 				err);
 			return err;
 		}
+/* XXX */
+#if 0
+		/* Inserted a user-addr SLB entry, see comment in slb.c */
+		isync();
+#endif
+
+		pr_warn("cmr> patching_addr %lx patching_mm %px\n", patching_addr,
+				patching_mm);
 	}
 #endif
 
@@ -217,6 +241,9 @@ static int do_patch_instruction(struct ppc_inst *addr, struct ppc_inst instr)
 	struct ppc_inst *patch_addr = NULL;
 	unsigned long flags;
 	struct patch_mapping patch_mapping;
+
+	struct ppc_inst old_instr;
+	old_instr = *addr;
 
 	/*
 	 * The patching_mm is initialized before calling mark_rodata_ro. Prior
@@ -246,6 +273,10 @@ static int do_patch_instruction(struct ppc_inst *addr, struct ppc_inst instr)
 	 * think we just wrote.
 	 */
 	WARN_ON(!ppc_inst_equal(ppc_inst_read(addr), instr));
+
+	pr_warn("cmr> patch_instruction: %3d @ %px %s(now: %s) -> %s\n", err,
+			addr, ppc_inst_as_str(old_instr), ppc_inst_as_str(ppc_inst_read(addr)),
+			ppc_inst_as_str(instr));
 
 out:
 	local_irq_restore(flags);

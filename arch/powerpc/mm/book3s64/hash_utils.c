@@ -1276,6 +1276,8 @@ static void check_paca_psize(unsigned long ea, struct mm_struct *mm,
 	}
 }
 
+extern void *read_patching_mm(void);
+
 /*
  * Result code is:
  *  0 - handled
@@ -1350,6 +1352,9 @@ int hash_page_mm(struct mm_struct *mm, unsigned long ea,
 	/* Check CPU locality */
 	if (user_region && mm_is_thread_local(mm))
 		flags |= HPTE_LOCAL_UPDATE;
+
+	if (read_patching_mm() == mm)
+		pr_warn("cmr> mm_is_thread_local: %d mm: %px\n", mm_is_thread_local(mm), mm);
 
 #ifndef CONFIG_PPC_64K_PAGES
 	/*
